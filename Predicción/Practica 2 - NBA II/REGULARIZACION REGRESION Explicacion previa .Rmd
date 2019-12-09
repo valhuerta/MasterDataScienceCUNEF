@@ -1,0 +1,147 @@
+---
+title: "Practica 2"
+author: "Val Huerta"
+date: "10/11/2019"
+output: pdf_document
+---
+
+
+```{r}
+#glmnet package.
+
+library(glmnet)
+library(AmesHousing)
+library(rsample)  # data splitting 
+library(glmnet)   # implementing regularized regression approaches
+library(dplyr)    # basic data manipulation procedures
+library(ggplot2)  # plotting
+```
+
+
+```{r}
+#Utilizamos Ames Housing data incluidos en AmesHousing package.
+
+# Create training (70%) and test (30%) sets for the AmesHousing::make_ames() data.
+# Use set.seed for reproducibility
+
+set.seed(123)
+ames_split <- initial_split(AmesHousing::make_ames(), prop = .7, strata = "Sale_Price")
+ames_train <- training(ames_split)
+ames_test  <- testing(ames_split)
+# fit with two strongly correlated variables
+lm(Sale_Price ~ Gr_Liv_Area + TotRms_AbvGrd, data = ames_train)
+
+# fit with just Gr_Liv_Area
+lm(Sale_Price ~ Gr_Liv_Area, data = ames_train)
+
+# fit with just TotRms_Area
+lm(Sale_Price ~ TotRms_AbvGrd, data = ames_train)
+
+# Create training and testing feature model matrices and response vectors.
+# we use model.matrix(...)[, -1] to discard the intercept
+ames_train_x <- model.matrix(Sale_Price ~ ., ames_train)[, -1]
+ames_train_y <- log(ames_train$Sale_Price) #Para que tenga varianza constante pongo la funcion 
+#logaritmo
+
+ames_test_x <- model.matrix(Sale_Price ~ ., ames_test)[, -1]
+ames_test_y <- log(ames_test$Sale_Price)
+
+# What is the dimension of of your feature matrix?
+dim(ames_train_x)
+
+# Apply Ridge regression to ames data
+ames_ridge <- glmnet(
+  x = ames_train_x,
+  y = ames_train_y,
+  alpha = 0
+)
+
+    #Arriba lo que hace es calcular un lambda. 
+
+plot(ames_ridge, xvar = "lambda")
+
+# lambdas applied to penalty parameter
+ames_ridge$lambda %>% head()
+## [1] 279.1035 254.3087 231.7166 211.1316 192.3752 175.2851
+
+# coefficients for the largest and smallest lambda parameters
+coef(ames_ridge)[c("Gr_Liv_Area", "TotRms_AbvGrd"), 100]
+##   Gr_Liv_Area TotRms_AbvGrd 
+##  0.0001004011  0.0096383231
+coef(ames_ridge)[c("Gr_Liv_Area", "TotRms_AbvGrd"), 1] 
+##   Gr_Liv_Area TotRms_AbvGrd 
+##  5.551202e-40  1.236184e-37
+
+```
+
+
+```{r}
+#Ahora queremos saber el TUNING de lambda
+# Apply CV Ridge regression to ames data
+ames_ridge <- cv.glmnet(
+  x = ames_train_x,
+  y = ames_train_y,
+  alpha = 0
+)
+
+# plot results
+plot(ames_ridge)
+
+min(ames_ridge$cvm)       # minimum MSE. DE TODOS LOS MODELOS QUE HA ESTIMADO CON EL CROSS VALIDATION, EL QUE MENOS MSE ES ESE, Y QUE PARA ESE ERROR LE CORRESPONDE EL LAMBDA QUE ES LO DE ABAJO. 
+## [1] 0.02147691
+ames_ridge$lambda.min     # lambda for this min MSE
+## [1] 0.1236602
+
+ames_ridge$cvm[ames_ridge$lambda == ames_ridge$lambda.1se]  # 1 st.error of min MSE
+## [1] 0.02488411
+ames_ridge$lambda.1se  # lambda for this MSE
+## [1] 0.6599372
+
+ames_ridge_min <- glmnet(
+  x = ames_train_x,
+  y = ames_train_y,
+  alpha = 0
+)
+
+plot(ames_ridge_min, xvar = "lambda")
+abline(v = log(ames_ridge$lambda.1se), col = "red", lty = "dashed")
+```
+```{r}
+#VENTAJAS Y DESVENTAJAS 
+coef(ames_ridge, s = "lambda.1se") %>%
+  tidy() %>%
+  filter(row != "(Intercept)") %>%
+  top_n(25, wt = abs(value)) %>%
+  ggplot(aes(value, reorder(row, value))) +
+  geom_point() +
+  ggtitle("Top 25 influential variables") +
+  xlab("Coefficient") +
+  ylab(NULL)
+```
+
+
+```{r}
+## Apply lasso regression to ames data
+ames_lasso <- glmnet(
+  x = ames_train_x,
+  y = ames_train_y,
+  alpha = 1
+)
+
+plot(ames_lasso, xvar = "lambda")
+
+
+# Apply CV Ridge regression to ames data
+ames_lasso <- cv.glmnet(
+  x = ames_train_x,
+  y = ames_train_y,
+  alpha = 1
+)
+# plot results
+plot(ames_lasso)
+
+```
+
+
+
+

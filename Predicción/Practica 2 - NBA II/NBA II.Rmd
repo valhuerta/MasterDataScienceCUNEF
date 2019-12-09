@@ -1,0 +1,280 @@
+---
+title: "NBA II"
+author: "Val Huerta"
+date: "10/15/2019"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+```{r}
+library(rsample)  
+library(glmnet)   
+library(dplyr)    
+library(ggplot2)  
+library(caret)
+```
+
+```{r}
+#Primero he procedido a cambiar los nombres de las variables para facilitarme el entendimiento
+#de las mismas, asi como la eliminacion de los posibles na que hubiera en la base de datos.
+NBAdata <- read.csv("~/Documents/CUNEF/Predicción/Clase 2 /nba.csv")
+NBAdata <- na.omit(NBAdata)
+
+names(NBAdata)[3] = "Country"
+names(NBAdata)[4] = "Ranking"
+names(NBAdata)[6] = "Team"
+names(NBAdata)[7] = "Partidos"
+names(NBAdata)[8] = "Minutos"
+names(NBAdata)[9] = "Efficiency"
+names(NBAdata)[10] = "Acierto"
+names(NBAdata)[11] = "IntentoTriple"
+names(NBAdata)[12] = "IntentoLibre"
+names(NBAdata)[13] = "ReboteAtaque"
+names(NBAdata)[14] = "ReboteDefensa"
+names(NBAdata)[15] = "RebotesTotal"
+names(NBAdata)[16] = "Asistencia"
+names(NBAdata)[17] = "Robo"
+names(NBAdata)[18] = "Bloqueo"
+names(NBAdata)[19] = "PerdidaDeBalon"
+names(NBAdata)[20] = "Compañerismo"
+names(NBAdata)[21] = "BuenAtaque"
+names(NBAdata)[22] = "BuenaDefensa"
+names(NBAdata)[23] = "BuenoTotal"
+names(NBAdata)[24] = "Contribución"
+
+dim(NBAdata)
+```
+
+
+```{r}
+library(MASS)
+library(leaps)
+
+#Ahora procedo a realizar el modelo de regresion para poder estirmar las relaciones 
+#entre las variables. La varibale Player y Country no las considero relevantes para mi
+#estudio ya que considero mas fuerte la relacion que hay del salario con el equipo en el que 
+#se juegue. Además en funcion de quien sea el jugador las demas variables serán mejores.
+#(si es un jugador "bueno" sus resultados tambien lo seran)
+#Tambien considero que el compañerismo no es base para la determinacion del salario.
+#Por último no cuento tampoco con que tenga un buen ataque o una buena defensa ya que en 
+#la base de datos hay una variable definida como bueno total que es un conjunto de ambas y con
+#considerar esa es suficiente. 
+
+
+#Nuestro objetivo es identificar y seleccionar, de entre todos los predictores disponibles,
+#aquellos que están más relacionados con la variable "Salary" y así crear el mejor modelo.
+
+#Para ello vamos a utilizar el modelo BACWARD que contiene desde el inicio todos los posibles
+#predictores, en cada repeticion se van a generar todos los modelos que se pueden crear 
+#eliminando un solo predictor a la vez y se va a seleccionar el que menor RSS o mayor R^2 tenga. 
+#Este proceso se repite hasta que se llega al modelo nulo sin predictores.
+
+BACKWARDmodel <- regsubsets(Salary~. - (Player + Country + Compañerismo + BuenAtaque + BuenaDefensa), data = NBAdata, nvmax = 23, method = "backward")
+
+BACKWARDmodel
+summary(BACKWARDmodel)
+
+
+summary(BACKWARDmodel)$adjr2
+which.max(summary(BACKWARDmodel)$adjr2)
+#El que explica mejor la variable dependiente es el R^2
+
+coef(object = BACKWARDmodel, 14)
+# Con esta funcion lo que encontramos son las variables conocidas como BETAS que son mas 
+#representativas para nuestro modelo y por tanto aquellas con las que trabajaremos.
+
+```
+
+```{r}
+#Mediante una representacion grafica comprobamos de una manera mas sencilla lo anteriormente 
+#realizado 
+p <- ggplot(data = data.frame(n_predictores = 1:23,
+                              R_ajustado = summary(BACKWARDmodel)$adjr2),
+            aes(x = n_predictores, y = R_ajustado)) +
+    geom_line() +
+    geom_point()
+
+#Se identifica en rojo el máximo
+p <- p + geom_point(aes(
+                    x = n_predictores[which.max(summary(BACKWARDmodel)$adjr2)],
+                    y = R_ajustado[which.max(summary(BACKWARDmodel)$adjr2)]),
+                    colour = "red", size = 3)
+p <- p +  scale_x_continuous(breaks = c(0:23)) + 
+          theme_bw() +
+          labs(title = 'R2_ajustado vs número de predictores', 
+               x =  'número predictores')
+p
+```
+
+
+
+```{r}
+#CROSS VALIDATION - VALIDATION SET 
+
+#Una vez realizado el modelo Backward, lo que quiero es estimar el test error de cada modelo 
+#y asi seleccionar el que menor error me propicie. 
+#Según la norma de one-standar-error, en resumen, es que seleccionemos el modelo mas simple de
+#entre los cuales el test error sea semejante, es decir, que los modelos sean practicamente 
+#igual de buenos.
+
+library(ISLR)
+set.seed(1)
+datos <- na.omit(NBAdata)
+
+# Lo que estamos haciendo es:
+# Emplear como training aproximadamente 2/3 de las observaciones, que en nuestro caso 
+#serian 322 Se seleccionan índices aleatorios que forman el training dataset
+
+train <- sample(x = 1:483, size = 322, replace = FALSE)
+
+# Los restantes forman el test dataset
+```
+
+
+```{r}
+
+BESTmodel <- regsubsets(Salary~.- (Player + Country + Compañerismo + BuenAtaque + BuenaDefensa), data = NBAdata[train,], nvmax = 23, method = "backward")
+BESTmodel
+
+#Como resultado obtenemos 23 modelos, el mejor para cada tamaño. 
+#En el siguiente paso lo que debemos hacer es compararlos mediante la estimacion del 
+#validation test error utilizando las observaciones que se han excluido del training 
+#y que se han designado como TEST.
+```
+```{r}
+# Se genera un vector que almacenará el test-error de cada modelo, en nuestro caso son 23.
+
+Error_validacion <- rep(NA, 23)
+
+#Devuelve una matriz formada con los predictores indicados en la fórmula e introduce 
+#para todas las observaciones un intercept con valor 1, así al multiplicar por los
+#coeficientes se obtiene el valor de la predicción (producto matricial).
+
+test_matrix <- model.matrix(Salary~.-(Player + Country + Compañerismo + BuenAtaque + BuenaDefensa), data = NBAdata[-train, ])
+
+#Para cada uno de los modelos almacenados en la variable mejores modelos
+for (i in 1:23) {
+# Se extraen los coeficientes del modelo
+    coeficientes <- coef(object = BESTmodel, id = i)
+# Se identifican los predictores que forman el modelo y se extraen de la
+# matriz modelo
+    predictores <- test_matrix[, names(coeficientes)]
+# Se obtienen las predicciones mediante el producto matricial de los
+# predictores extraídos y los coeficientes del modelo
+    predicciones <- predictores %*% coeficientes
+# Finalmente se calcula la estimación del test error como el promedio de
+# los residuos al cuadrado (MSE)
+    Error_validacion[i] <- mean((datos$Salary[-train] - predicciones)^2)
+}
+
+which.min(Error_validacion)
+#El valor que minimiza mi error es el que esta en el puesto 5, por lo tanto el que utilizare 
+
+```
+```{r}
+sqrt(Error_validacion[5])
+Error_validacion
+```
+
+
+```{r}
+#REPRESEANTACION GRAFICA. 
+
+p <- ggplot(data = data.frame(n_predictores = 1:23,
+                              Estimacion_MSE = Error_validacion),
+            aes(x = n_predictores, y = Estimacion_MSE)) +
+    geom_line() +
+    geom_point()
+
+p <- p + geom_point(aes(x = n_predictores[which.min(Error_validacion)], 
+                        y = Error_validacion[which.min(Error_validacion)]),
+                        colour = "red", size = 3)
+
+p <- p +  scale_x_continuous(breaks = c(0:23)) + 
+          theme_bw() +
+          labs(title = 'validation MSE vs número de predictores',
+               x =  'número predictores')
+p
+
+```
+
+
+
+```{r}
+#En ultimo lugar, al tener ya identificada la cantidad de predictores que debe contener 
+#nuestro modelo que en nuestro caso es 5, debemos volver a ajustar los posibles modelos 
+#con 5 predictores empleando tanto las variables de training como las de test (training + test)
+
+BESTmodel <- regsubsets(Salary~.-(Player + Country + Compañerismo + BuenAtaque + BuenaDefensa), data = NBAdata, nvmax = 23, method = "backward")
+
+coef(object = BESTmodel, id = 5)
+
+#El problema de este modelo de validacion simple es que depende mucho de como se 
+#repartan las observaciones entre el train y el test.
+```
+```{r}
+#ELASTIC NET
+#Es una combinacion de Ridge y Lasso, que se utilizan para minimizar el problema 
+#entre el sesgo y la varianza proporcionando una disminucion del error de prediccion.
+
+set.seed(123)
+NBA_split <- initial_split(NBAdata, prop = .7, strata = "Salary")
+NBA_train <- training(NBA_split)
+NBA_test  <- testing(NBA_split)
+
+```
+```{r}
+NBA_train_x <- model.matrix(Salary ~ ., NBA_train)[, -1]
+NBA_train_y <- NBA_train$Salary
+
+```
+```{r}
+NBA_test_x <- model.matrix(Salary ~ ., NBA_test)[, -1]
+NBA_test_y <- NBA_test$Salary
+```
+
+```{r}
+
+train_control <- trainControl(method = "cv", number = 10)
+
+caret_mod <- train(
+  x = NBA_train_x,
+  y = NBA_train_y,
+  method = "glmnet",
+  preProc = c("center", "scale", "zv", "nzv"),
+  trControl = train_control,
+  tuneLength = 10
+)
+
+caret_mod
+```
+
+ 
+```{r}
+#El valor de alpha me ha dado 1, lo que determina que estamos ante un metodo Lasso. 
+#El método lasso fuerza a que las estimaciones de los coeficientes de los predictores 
+#tiendan a cero. La diferencia con Ridge es que lasso sí es capaz de fijar 
+#algunos de ellos exactamente a cero, lo que permite además de reducir la varianza, 
+#realizar selección de predictores.
+
+library(glmnet)
+# x e y son la matriz modelo y el vector respuesta creados anteriormente con
+# los datos de NBAdata 
+cv_lasso <- cv.glmnet(x = NBA_train_x, y = NBA_train_y, alpha = 1)
+min(cv_lasso$cvm)
+
+pred <- predict(cv_lasso,s=cv_lasso$lambda.min,NBA_test_x)
+mean((NBA_test_y-  pred)^2)
+
+sqrt(3.341885e+13)
+
+#El modelo tiene un error de 5780904 millones de euros 
+
+```
+
+
+
+
+
+
+

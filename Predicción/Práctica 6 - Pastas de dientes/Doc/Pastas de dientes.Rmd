@@ -1,0 +1,213 @@
+---
+title: "Pastas de dientes"
+author: "Val Huerta"
+date: "11/20/2019"
+output: pdf_document
+---
+#Librerías
+```{r warning=FALSE, message=FALSE}
+library(openxlsx)
+library(skimr)
+library(fpp2)
+library(ggplot2)
+library(zoo)
+library(ggfortify)
+require(forecast)
+require(xts)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(TSA)
+library(Hmisc)
+library(astsa)
+library(tsoutliers)
+```
+
+#Lectura de datos 
+```{r}
+datos<-read.xlsx("~/Documents/1- Master Data Science.CUNEF/Predicción/Práctica 6 - Pastas de dientes/Data/data.xlsx")
+datos$Date <- as.Date(paste(datos$Year, datos$Week, 1, sep = "-"), "%Y-%U-%u")
+```
+
+
+#Análisis exploratorio 
+```{r}
+skim(datos)
+```
+
+```{r}
+#dividimos la serie en 2 
+xcolgate <- ts(datos$Colgate, start = 1958, frequency = 52)
+xcrest <- ts(datos$Crest, start = 1958, frequency = 52)
+```
+
+```{r}
+ggseasonplot(xcolgate, month.labels = TRUE, month.labels.left = TRUE) +
+ylab("Cuota de mercado") +
+ggtitle("Seasonal plot: cuota de mercado COLGATE")
+
+ggseasonplot(xcrest, month.labels = TRUE, month.labels.left = TRUE) +
+ylab("Cuota de mercado") +
+ggtitle("Seasonal plot: cuota de mercado CREST")
+```
+
+#Tratamiento de datos
+```{r}
+#Conversion de datos
+
+#Transformamos a zoo
+zcolgate<-as.zoo(xcolgate)
+zcrest<-as.zoo(xcrest)
+
+names(zcolgate)<-"Colgate"
+names(zcrest)<-"Crest"
+
+view(zcolgate)
+
+#Plot serie
+autoplot(zcolgate)+ggtitle("Cuota de mercado")+ xlab("Semanas") + ylab("Colgate")
+autoplot(zcrest)+ggtitle("Cuota de mercado")+ xlab("Semanas") + ylab("Crest")
+```
+
+```{r}
+#Seleccion del numero de observaciones para comparar la prediccion
+        #Esto ya es el train 
+#Eliminamos las semanas de 1963
+cOmit = 16
+
+#Data Size
+nObsColgate=length(zcolgate)
+nObsCrest= length(zcrest)
+
+
+#Sub_sample: para hacer el forecast
+oColgate <- window(zcolgate,start=index(zcolgate[1]),end=index(zcolgate[nObsColgate-cOmit])) 
+
+oCrest <- window(zcrest,start=index(zcrest[1]),end=index(zcrest[nObsCrest-cOmit])) 
+
+View(oColgate)
+```
+
+
+#MODELO ARIMA
+Como vemos la serie temporal no es estacionaria, por lo que no es constante en varianza y media. 
+Debemos realizar una transformación logarítmica primero de la varianza y observamos los resultados, después, si no apreciamos estacionariedad aun asi, procedemos a realizar el logaritmo de la tasa de variación.
+```{r}
+#Logaritmo para hacerla estacionario en VARIANZA 
+zcolgate_log <- log(zcolgate)
+zcrest_log<-log(zcrest)
+```
+
+
+```{r}
+#Diferencia para hacerla estacionario en MEDIA 
+ggtsdisplay(diff(zcolgate))
+ggtsdisplay(diff(zcrest))
+```
+
+
+```{r}
+#Se ha aplicado logaritmos y diferencia en media
+ggtsdisplay(diff(zcolgate_log))
+ggtsdisplay(diff(zcrest_log))
+```
+
+
+```{r}
+#fitting modelo ARIMA
+fit_colgate <- auto.arima(oColgate, lambda = 0) #selecciona automaticamente los coeficientes 
+summary(fit_colgate)
+
+fit_crest <- auto.arima(oCrest, lambda = 0)
+summary(fit_crest)
+
+#residual analysis
+ggtsdisplay(fit_colgate$residuals,
+            main = "Residuos de ARIMA(0,1,1) colgate") #residuos colgate
+ggtsdisplay(fit_crest$residuals,
+            main = "Residuos de ARIMA(3,1,0) crest") #residuos crest
+```
+
+#Predicción
+```{r}
+#Predicción COLGATE
+
+fColgate.arima<-forecast(fit_colgate)
+
+df_new <- data.frame(value = as.vector(zcolgate), time = time(zcolgate)) 
+
+ggplot(df_new)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ geom_forecast(fColgate.arima,alpha=0.4)+xlab("Fecha")+ylab("Primas")+ggtitle("ARIMA: Predicción Colgate") + theme_bw() 
+
+fColgate.arima
+```
+
+```{r}
+#Predicción CREST
+fCrest.arima<-forecast(fit_crest)
+
+df_new <- data.frame(value = as.vector(zcrest), time = time(zcrest)) 
+
+ggplot(df_new)+geom_point(aes(x=time,y=value))+geom_line(aes(x=time,y=value))+ geom_forecast(fCrest.arima,alpha=0.4)+xlab("Fecha")+ylab("Primas")+ggtitle("ARIMA: Predicción Crest") + theme_bw() 
+
+fCrest.arima
+```
+#OUTLIERS
+```{r}
+colgate_outlier <- tso(xcolgate, types = c("TC", "AO", "LS", "IO", "SLS"))
+plot(colgate_outlier)
+```
+Obtenemos los outliers para los datos de la serie de colgate. Los puntos rojos son los cambios 
+hexogenos, que de no haber existido la serie seria la representada en azul.
+El efecto de los outliers se muestra como en 1960 cuando irrumpe Crest se produce un impulso hacia
+abajo.
+
+```{r}
+crest_outlier <- tso(xcrest, types = c("TC", "AO", "LS", "IO", "SLS"))
+plot(crest_outlier)
+```
+Para el caso de Crest, el efecto de los outliers produce un escalon en 1960, cuando el ADA le da la 
+validación y entra en el mercado. Se produce un impulso hacia abajo y un escalon a finales del año 
+1961.
+
+#MODELO ARIMAX 
+```{r}
+#Colgate 
+air.m1=arimax(log(oColgate),order=c(0,1,1),
+        seasonal=list(order=c(0,1,1),period=12),
+        xtransf=data.frame(impulso=1*(seq(oColgate)==135),
+            impulso=1*(seq(oColgate)==135)),
+        transfer=list(c(0,0),c(1,0)), 
+        xreg=data.frame(Dec96=1*(seq(oColgate)==12),
+        Jan97=1*(seq(oColgate)==13),Dec02=1*(seq(oColgate)==84)),
+        
+method='ML')
+air.m1
+
+```
+Interpretación: ma1, sma1 son los datos atípicos/ outliers.
+```{r}
+air.m1=arimax(log(oCrest),order=c(3,1,0),
+        seasonal=list(order=c(1,0,0),period=52),
+        xtransf=data.frame(impulso=1*(seq(oColgate)==135),
+            impulso=1*(seq(oCrest)==135)),
+        transfer=list(c(0,0),c(1,0)), 
+        xreg=data.frame(Dec96=1*(seq(oCrest)==12),
+        Jan97=1*(seq(oCrest)==13),Dec02=1*(seq(oCrest)==84)),
+        
+method='ML')
+air.m1
+```
+
+#ARIMAX CARLOTA 
+```{r}
+crest.m1 <- arimax(as.double(zcrest), order = c(0,1,1),
+                   xtransf=data.frame(step_AGO_sem1_60 = 1*(seq(zcrest) > 135),
+                                      pulse_AGO_sem1_60 = 1*(seq(zcrest) == 135)),
+                   xreg = data.frame(AGO_sem1_60 = 1*(seq(zcrest) == 136)),
+                   transfer=list(c(3,0),c(0,0)),
+                   method='ML')
+crest.m1
+```
+
+##TENGO UNA PRACTICA RESUELTA EN FAVORITOS DE FIREFOX
+

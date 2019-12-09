@@ -1,0 +1,284 @@
+---
+title: "Practica III"
+author: "Val Huerta"
+date: "10/22/2019"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+# Librerias 
+```{r}
+#lIBRERIAS
+library(knitr)
+library(tidyverse)
+library(skimr) # Beautiful Summarize
+library(magrittr) # Pipe operators
+library(corrplot) # Correlations
+library(ggcorrplot)  # Correlations
+library(PerformanceAnalytics) # Correlations
+library(leaps) # Model selection
+library(caret) # Cross Validation
+library(bestglm) # Cross Validation
+library(glmnet) # Regularization
+library(gam) #GAM 
+library(rsample) #Para el train/test
+```
+# Read Data
+
+```{r}
+library(ISLR)
+day<- read.csv("day.csv")
+
+```
+
+# Summarize Data
+
+```{r}
+skim(day)
+
+```
+
+# Correlaciones 
+```{r}
+#AQUI MIRO LAS CORRELACIONES y quito la variable instant y dteday porque es una variable factor.
+
+#PARA VER PROBLEMAS DE MULTICOLINEALIDAD, dependiendo de su correlacion si es lineal o no.
+#El rojo significa que son valores negativos.
+
+# Variables excluidas:
+factores <- c("instant","dteday")
+
+
+# Correlaciones
+#corplot solo grafica la correlacion no me la calcula por eso pone luego cor.
+corrplot(cor(day%>% 
+               select_at(vars(-factores)), 
+             use = "complete.obs"), 
+         method = "circle",type = "upper")
+
+# Other Correlations
+
+ggcorrplot(cor(day %>% 
+               select_at(vars(-factores)), 
+            use = "complete.obs"),
+            hc.order = TRUE,
+            type = "lower",  lab = TRUE)
+
+# Other Correlations
+#Las estrellas en rojo lo que indica es que si es distinta de 0, es decir cuales estan correlacionadas. Las lineas rectas determinan que no hay relacion entre ellas 
+chart.Correlation(day %>%
+                  select_at(vars(-factores)),
+               histogram=TRUE, pch=19)
+```
+
+# Grados de libertad 
+
+```{r}
+#Aqui estoy sacando los grados de libertad de cada variable junto con el CV. 
+#Unicamente los calculo para las variables que no son categoricas ni dumbies.
+
+DOFtemp <- smooth.spline(day$temp,day$cnt, cv=TRUE)
+DOFatemp <- smooth.spline(day$atemp,day$cnt, cv=TRUE)
+DOFhum <- smooth.spline(day$hum,day$cnt, cv=TRUE)
+DOFwindspeed <- smooth.spline(day$windspeed,day$cnt, cv=TRUE)
+DOFcasual <- smooth.spline(day$casual,day$cnt, cv=TRUE)
+DOFregistered <- smooth.spline(day$registered, day$cnt,cv=TRUE)
+
+
+DOFtemp$df
+DOFatemp$df
+DOFhum$df
+DOFwindspeed$df
+DOFcasual$df
+DOFregistered$df
+
+
+#Ejemplo gráfico cogiendo la variable "windspeed". Utilizando para comparar con 
+#16 grados de libertad
+
+plot(day$windspeed,day$cnt, xlim=day$windspeedLims, col='gray')
+title('Smoothing Spline')
+DOFwindspeed <- smooth.spline(day$windspeed,day$cnt, cv=TRUE)
+DOFwindspeed2 <- smooth.spline(day$windspeed,day$cnt, df=16)
+lines(DOFwindspeed, col='red', lwd=2)
+lines(DOFwindspeed2, col='blue', lwd=1)
+legend('topright', legend=c('6 DF', '16DF'),
+       col=c('red','blue'), lty=1, lwd=2, cex=0.8)
+   
+
+```
+# Cambio a factor 
+
+```{r}
+#Procedemos al cambio de las variables categoricas a factor para poder incluirlas en el modelo.
+#Son las siguientes:
+
+day$season <- as.factor(day$season)
+day$weekday <- as.factor(day$weekday)
+day$weathersit <- as.factor(day$weathersit)
+day$mnth <- as.factor(day$mnth)
+
+#Las DUMBIES no hay que cambiarlas a factor pero son: holiday, season y workingday 
+```
+
+# Modelo GAM 
+
+```{r}
+#A continuacion vamos a realizar los pertinentes modelos con GAM. 
+
+gam1 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday + workingday + weathersit + mnth + holiday + yr,
+            data=day)
+
+plot(gam1, se=TRUE, col='red')
+
+
+```
+```{r}
+summary(gam1)
+```
+```{r}
+#Ahora voy a realizar mas modelos GAM quitando las variables menos significativas
+  #Sin mnth, weathersit, holiday 
+gam2 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday + workingday + yr, data=day)
+
+plot(gam2, se=TRUE, col='red')
+```
+```{r}
+summary(gam2)
+```
+```{r}
+#Sin workingday,yr 
+gam3 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday, data=day)
+
+plot(gam3, se=TRUE, col='red')
+```
+```{r}
+summary(gam3)
+```
+```{r}
+#Sin season y weekday  
+gam4 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976), data=day)
+
+plot(gam4, se=TRUE, col='red')
+```
+```{r}
+summary(gam4)
+```
+
+#ANOVA 
+```{r}
+#ANOVA
+  #Realizamos el test anova para comparar los 4 modelos que hemos propuesto anteriormente
+  #Podemos comprobar que el que menor residuo tiene es el modelo 1 por lo que va a ser 
+  #el modelo con el que vamos a trabajar.
+anova(gam1, gam2, gam3, gam4, test='F')
+
+```
+
+#CROSS VALIDATION 
+```{r}
+#Una vez escogido el modelo, vamos a proceder a dividir nuestra base de datos en 
+#train y test para predecir. 
+
+set.seed(123)
+day_split <- initial_split(day, prop =.7, strata = "cnt")
+day_train <- training(day_split)
+day_test <- testing(day_split)
+
+#Tenemos la base de datos dividida en 70/30, y vamos a proceder a introducir nuestro modelo
+#en el test para saber como predice.
+
+gam_train <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday + workingday + weathersit + mnth + holiday + yr,data=day_train)
+
+plot(gam_train, se=TRUE, col='red')
+```
+```{r}
+summary(gam_train)
+```
+#PREDICCION 
+
+```{r}
+#Vamos a predecir para saber el error. Vemos que es practicamente 0 por lo que 
+#voy a realizar otro modelo sin las variables casual y register.
+predict_modelo_gam <- predict(gam1,day_test)
+test_error_gam <- mean((predict_modelo_gam - day_test$cnt)^2)
+test_error_gam
+```
+
+## -- MODELO 2 --
+# GAM 
+```{r}
+#Realizamos los posibles modelos primero sin las variables casual y register
+gam1.2 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ weekday + workingday + weathersit + mnth + holiday + yr,
+            data=day)
+
+plot(gam1, se=TRUE, col='red')
+```
+```{r}
+summary(gam1.2)
+```
+
+
+```{r}
+#En este gam lo realizamos quitando weathersit. 
+gam1.2.2 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876) + weekday + workingday + yr, data=day)
+plot(gam2, se=TRUE, col='red')
+```
+```{r}
+summary(gam1.2.2)
+```
+```{r}
+#Procedemos a hacer el ANOVA para saber cual de los dos modelos es mejor teniendo en cuenta
+#el residuo que tiene uno, el que menor residuo tenga será el que escojamos. En nuestro caso,   
+#el mejor modelo es el gam.1.2
+
+anova(gam1.2,gam1.2.2, test="F")
+```
+# CROSS VALIDATION 2 
+```{r}
+#Una vez escogido el modelo, vamos a proceder a dividir nuestra base de datos en 
+#train y test para predecir. 
+
+set.seed(123)
+day_split2 <- initial_split(day, prop =.7, strata = "cnt")
+day_train2 <- training(day_split2)
+day_test2 <- testing(day_split2)
+
+#Tenemos la base de datos dividida en 70/30, y vamos a proceder a introducir nuestro modelo
+#en el test para saber como predice.
+
+gam_train2 <- gam(cnt~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ weekday + workingday + weathersit + mnth + holiday + yr,
+            data=day)
+
+plot(gam_train2, se=TRUE, col='red')
+```
+```{r}
+summary(gam_train2)
+```
+#Prediccion 2 
+```{r}
+#Vamos a predecir para saber el error. Vemos que es practicamente 0 por lo que 
+#voy a realizar otro modelo sin las variables casual y register.
+predict_modelo_gam2 <- predict(gam1.2,day_test)
+test_error_gam2 <- mean((predict_modelo_gam2 - day_test$cnt)^2)
+test_error_gam2
+```
+#Error final 
+```{r}
+sqrt(test_error_gam2)
+```
+```{r}
+#Tras la realizacion de los dos modelos, concluimos que las variables casual y register 
+#no son necesarias ya que la suma de ambas es el resultado de cnt. 
+#Por lo tanto, centrandonos en el segundo modelo, aplicando los test pertinentes, tenemos 
+#un error de 757.903 que teniendo en cuenta que la media de registros esta al rededor de 4000, 
+#es muy buen error 
+```
+
+
+
+
+
+
+
+

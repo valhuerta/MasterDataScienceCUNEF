@@ -1,0 +1,166 @@
+---
+title: "NBA-PREDICCION"
+author: "Val Huerta"
+date: "10/7/2019"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r}
+# En primer lugar comenzamos eliminando los posibles NA de nuestra base de datos, y a
+#continuacion, para facilitarme el entendimiento considero una buena opción renombrar las #varibles.
+
+NBAdata <- read.csv("~/Documents/CUNEF/Predicción/Practica 1- prediccion/nba.csv")
+NBAdata <- na.omit(NBAdata)
+library(dplyr)
+names(NBAdata)[3] = "Country"
+names(NBAdata)[4] = "Ranking"
+names(NBAdata)[6] = "Team"
+names(NBAdata)[7] = "Partidos"
+names(NBAdata)[8] = "Minutos"
+names(NBAdata)[9] = "Efficiency"
+names(NBAdata)[10] = "Acierto"
+names(NBAdata)[11] = "IntentoTriple"
+names(NBAdata)[12] = "IntentoLibre"
+names(NBAdata)[13] = "ReboteAtaque"
+names(NBAdata)[14] = "ReboteDefensa"
+names(NBAdata)[15] = "RebotesTotal"
+names(NBAdata)[16] = "Asistencia"
+names(NBAdata)[17] = "Robo"
+names(NBAdata)[18] = "Bloqueo"
+names(NBAdata)[19] = "PerdidaDeBalon"
+names(NBAdata)[20] = "Compañerismo"
+names(NBAdata)[21] = "BuenAtaque"
+names(NBAdata)[22] = "BuenaDefensa"
+names(NBAdata)[23] = "BuenoTotal"
+names(NBAdata)[24] = "Contribución"
+
+dim(NBAdata)
+#Podemos observar que el numero de variables supera en más de 10 veces al numero de predictores #483 frente a 28 variables. Con lo que podemos adelantar que la regresión por 
+#minimos cuadrados no es adecuada 
+
+```
+
+
+
+```{r}
+
+library(MASS)
+library(leaps)
+
+#En un primer momento vamos a realizar una regresion mediante la funcion lm, nombrandolo como #"Prediccion1". Para ello incluimos en primer lugar Salary que es la variable que queremos medir, #seguida de las variables que considero que NO son relevantes para el estudio. Y la base de datos #que usamos es la que he denominado como "NBAdata". Con esto lo que conseguimos es realizar una #selección de variables.
+
+Prediccion1 <- lm(Salary~ . - (Team + Player + Country), data=NBAdata)
+summary(Prediccion1)
+
+#Gracias a la funcion "lm", vamos a saber que variables son mas representativas para nuestro #estudio. En mi caso seria, Ranking, Age, Partidos y Minutos. 
+```
+```{r}
+#Utilizamos el modelo Backward:
+```
+
+
+```{r}
+library(MASS)
+library(leaps)
+stepAIC(Prediccion1, direction="backward")
+```
+
+```{r}
+BACKWARD=regsubsets(Salary~.-(Team + Player + Country),NBAdata,method ="backward")
+summary (BACKWARD )
+#En este paso vamos a poder ver mediante el simbolo "*" las variables que son mas 
+#representativas para nuestro modelo. 
+```
+
+```{r}
+Prediccion2 <- lm(Salary ~ Ranking + Age + Partidos + Minutos + IntentoTriple + ReboteAtaque + RebotesTotal + Compañerismo + BuenoTotal, NBAdata)
+
+summary(Prediccion2)
+
+#Una vez que he obtenido las variables que son mas representativas, creo un nuevo objeto al que #llamo Prediccion2 el cual incluye el lm con dichas variables para que me determine la #representatividad de aquellas una vez excluidas las que no me aportan nada. 
+```
+
+
+```{r}
+#Vamos a detectar la multicolinealidad mediante "vif".
+library(car)
+vif(Prediccion2)
+
+sqrt(vif(Prediccion2)) >2
+
+#Los que dan TRUE son los que tienen multicolinealidad, en este caso son partidos y minutos.Por #ello en el siguiente paso decido realizar el mismo paso pero esta vez sin "minutos"
+```
+```{r}
+#Realizo el lm SIN MINUTOS ya que es el valor mas grande, nombrandolo como un nuevo objeto #denominado Prediccion3.
+#Despues realizo el vif a ese nuevo objeto para saber si hay multicolinealidad o no.
+
+Prediccion3 <- lm(Salary ~ Ranking + Age + Partidos + IntentoTriple + ReboteAtaque + RebotesTotal + Compañerismo + BuenoTotal, NBAdata)
+
+summary(Prediccion3)
+
+library(car)
+vif(Prediccion3)
+
+sqrt(vif(Prediccion3)) >2
+```
+
+```{r}
+#Al no haber multicolinealidad, realizo el BIC. Y hay que seleccionar el modelo que menor BIC me #de, en este caso seria "prediccion3".
+BIC(Prediccion1, Prediccion3)
+```
+
+
+```{r}
+#Usamos un qqplot para ver graficamente nuestro modelo
+library(car)
+qqPlot(Prediccion3, labels=row.names(NBAdata), id.method="identify",
+      simulate=TRUE, main="Q-Q Plot")
+
+#No es una distribución normal.
+
+```
+```{r}
+library(fBasics)
+vresid<-resid(Prediccion3) 
+jbTest(vresid)
+#En base al test podemos determinar que se rechaza la hipotesis nula puesto que 
+#p-value: < 2.2e-16, por lo que no hay normalidad. 
+```
+
+```{r}
+#CROSS VALIDATION - VALIDATION SET
+
+#Consiste en dividir la muestra de forma aleatoria en dos submuestras. Utilizar una para el #training (se estima el modelo) y la otra para el testing (se predice el modelo)
+
+library(ISLR)
+set.seed(8)
+numnba=nrow(NBAdata) #
+train=sample(numnba, numnba/2) # Datos con los que entreno mi modelo
+
+regres.train =lm(Salary ~ Ranking + Age + Partidos + IntentoTriple + ReboteAtaque + RebotesTotal + Compañerismo + BuenoTotal, NBAdata , subset =train )
+attach(NBAdata)
+
+
+mean((Salary-predict(regres.train, Auto))[-train ]^2)
+sqrt(mean((Salary-predict(regres.train, Auto))[-train ]^2))
+#Con el crossvalidation lo que me va a dar es la media del error de mi modelo, es decir hay un #error medio en mi modelo de 5360911
+
+```
+
+
+```{r}
+#Por último vamos a predecir el salario de un jugador de la base de datos, en este caso #seleccionamos por ejemplo a Marc Gasol que tiene un salario de 2328652.
+
+predict.lm(Prediccion3,data.frame(Age=33 , Ranking=48 , Partidos=72 , IntentoTriple=0.309, RebotesTotal= 14.2, ReboteAtaque=3.6, Compañerismo=25.7 , BuenoTotal=4.0 , OBPM=-0.2))
+
+Resultados <-predict.lm(Prediccion3)
+
+#Nos da que Marc Gasol deberia cobrar un salario de 11765295 por lo que podriamos decir que este #jugador esta infrabalorado. 
+```
+
+
+
+
+
